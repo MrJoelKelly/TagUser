@@ -27,6 +27,14 @@
       'username': true,
       'photo': false
     },
+    multiple: { //Whether multiple users may be selected for the given input
+      enabled: false,
+      element: ''
+    },
+    position_offset: { //Float user-selector position offset
+      unit: 'px', //I.e. %, em, rem etc.
+      value: 15 //Actual value to use, so by default 15px
+    }
   };
 
   //Variable to store our users in
@@ -36,6 +44,10 @@
     TagUser = $(this);
     setOptions(user_options);
     loadUsers(user_options);
+
+    if(!isEmpty(users)){
+      initiate();
+    }
   };
 
   //Takes user defined options and updates the default options where appropriate
@@ -58,6 +70,12 @@
           switch(key){
             case 'users':
               valid = false; //These will be loaded in after everything else
+              break;
+            case 'multiple':
+              if(!isEmpty(user_options[key].enabled)){
+                user_options[key].enabled = getBoolean(user_options[key].enabled);
+                valid = true;
+              }
               break;
             default: //Any others that don't require validation, such as buttonText
               valid = true;
@@ -100,69 +118,156 @@
     }else if(options.search_type === 'remote'){
 
     }
-
-    //Data validated
-    if(!isEmpty(users)){
-      initiate();
-    }
   }
 
   //Initialises the element
   function initiate(){
-    TagUser.keyup(function(){ search(); })
+    TagUser.keyup(function(e){
+      //Don't fire on Shift, Ctrl, Alt
+      if(e.keyCode != 16 && e.keyCode != 17 && e.keyCode != 18){
+        if(!options.multiple && TagUser.siblings('.TagUser-output').length > 0){
+          return false;
+        }
+        search(e.keyCode);
+      }
+    })
   }
 
   //Searches every time the user keyup's
-  function search(){
+  var current_search_index = -1; //Denotes the index within the input element where the @ was first used, -1 if no search currently
+  function search(keyCode){
     $('.TagUser-float').remove(); //Remove any pre-existing floats
 
     var search_query = TagUser.val().toLowerCase();
 
     if(!isEmpty(search_query)){
-      var top = Math.round(TagUser.position().top),
-          height = Math.round(TagUser.height()),
-          offset = 30,
-          total = top + height + offset;
-      var output = '<div class="TagUser-float" style="top:' + total + 'px"><div class="TagUser-loader"></div></div>';
-      TagUser.after(output);
+      if(search_query.charAt(search_query.length - 1) == '@' || current_search_index > -1){ //TagUser-active on the element indicates a search has begun using @
+        //If new user search, set the search index to this position
+        if(search_query.charAt(search_query.length - 1) == '@'){
+          current_search_index = search_query.length - 1;
+        }
 
-      //Now get an array of user keys which match
-      var matches = new Array();
+        //If user pressed backsapce or del, check if they've deleted the initial @ Search request
+        if(keyCode == 8 || keyCode == 46){
+          if(isEmpty(search_query.charAt(current_search_index))){ //User deleted the original @
+            current_search_index = -1;
+            return false;
+          }
+        }
 
-      //Search for matches
-      users_search:
-      for(var key in users){
-        sub_search:
-        for(var sub_key in users[key]){
-          if(options.keys[sub_key]){ //Check this is a searchable key
-            var test_string = users[key][sub_key].toLowerCase();
-            if(test_string.search(search_query) > -1){
-              matches.push(key);
-              break sub_search;
+        var top = Math.round(TagUser.position().top),
+            height = Math.round(TagUser.height()),
+            total = top + height + options.position_offset.value,
+            output = '<div class="TagUser-float" style="top:' + total + options.position_offset.unit + '"><div class="TagUser-loader"></div></div>';
+        TagUser.after(output);
+
+        //Now get an array of user keys which match
+        var matches = new Array();
+        search_query = search_query.substring(current_search_index+1, search_query.length); //Cut down to just the data after the @
+        console.log(search_query)
+
+        //Search for matches
+        users_search:
+        for(var key in users){
+          sub_search:
+          for(var sub_key in users[key]){
+            if(options.keys[sub_key]){ //Check this is a searchable key
+              var test_string = users[key][sub_key].toLowerCase();
+              if(test_string.search(search_query) > -1){
+                matches.push(key);
+                break sub_search;
+              }
             }
           }
         }
+
+        //Now draw matches
+        output = '';
+        $.each(matches, function(index, user_key){
+          output += '<div class="TagUser-float-user" data-TagUser-id="' + user_key + '">';
+
+          if(options.photo){
+            output += '<div class="TagUser-float-user-photo">';
+            if(!isEmpty(users[user_key].photo)){
+              output += '<img src="' + users[user_key].photo + '">';
+            }else if(options.default_photo.type === 'img'){
+              output += '<img src="' + options.default_photo.src + '">';
+            }else if(options.default_photo.type === 'markup'){
+              output += options.default_photo.src;
+            }
+            output += '</div>';
+          }
+
+          output += '<div class="TagUser-float-user-name">';
+
+          if(!isEmpty(users[user_key].name)){
+            output += '<div>' + users[user_key].name + '</div>';
+          }
+          if(!isEmpty(users[user_key].username)){
+            output +='<div>@' + users[user_key].username + '</div>';
+          }
+          output += '</div></div>';
+        })
+
+        //If no matches found and the last character input was a space, reset the search index
+        if(isEmpty(output) && search_query.charAt(search_query.length - 1) == ' '){
+          current_search_index = -1;
+        }
+
+        $('.TagUser-float').append(output).find('.TagUser-loader').remove();
+
+        //Bind user click
+        $('.TagUser-float-user').click(function(){
+          selectUser($(this).attr('data-taguser-id'));
+        })
+      }
+    }
+  }
+
+  //On user select, user_id is the given key for the selected user stored in data-taguser-id
+  function selectUser(user_id){
+    //Select name prefix for inputs
+    if(!isEmpty(TagUser.attr('id'))){
+      var name = 'TagUser-' + TagUser.attr('id');
+    }else{
+      var name = 'TagUser';
+    }
+
+    //If user can select multiple users
+    if(options.multiple){
+
+    }else{
+      //Remove existing elements
+      TagUser.siblings('.TagUser-output').remove();
+      if(TagUser.is('input[type=text]')){ //Text input and only one selection, we append a single input[type=hidden]
+        TagUser.val('').hide();
+        TagUser.after('<div class="TagUser-selected-label" data-TagUser-id="' + user_id + '"><div><div>' + users[user_id].name + '</div><div><svg class="TagUser-X" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M24 20.188l-8.315-8.209 8.2-8.282-3.697-3.697-8.212 8.318-8.31-8.203-3.666 3.666 8.321 8.24-8.206 8.313 3.666 3.666 8.237-8.318 8.285 8.203z"/></svg></div></div>')
+        TagUser.after('<input type="hidden" class="TagUser-output" name="' + name + '" value="' + user_id + '">');
+        $('.TagUser-float').remove();
+      }
+    }
+
+    //Bind any newly added labels to delete label and input
+    $('.TagUser-selected-label svg').click(function(){
+      var parent = $(this).closest('.TagUser-selected-label');
+      var id = parent.attr('data-TagUser-id');
+
+      parent.remove();
+
+      //Remove the appropriateinput[type=hidden] element
+      TagUser.siblings('.TagUser-output').each(function(){
+        if($(this).val() == id){
+          $(this).remove();
+          return false;
+        }
+      })
+
+      if(TagUser.is('input[type=text]')){
+
       }
 
-      //Now draw matches
-      output = '';
-      $.each(matches, function(index, user_key){
-        output += '<div class="TagUser-float-user">';
-        if(options.photo){
-          output += '<div class="TagUser-float-user-photo">';
-          if(!isEmpty(users[user_key].photo)){
-            output += '<img src="' + users[user_key].photo + '">';
-          }else if(options.default_photo.type === 'img'){
-            output += '<img src="' + options.default_photo.src + '">';
-          }else if(options.default_photo.type === 'markup'){
-            output += options.default_photo.src;
-          }
-          output += '</div>';
-        }
-        output += '<div class="TagUser-float-user-name"><div>' + users[user_key].name + '</div><div>@' + users[user_key].username + '</div></div></div>';
-      })
-      $('.TagUser-float').append(output).find('.TagUser-loader').remove();
-    }
+      TagUser.show();
+    })
   }
 
   //Used to test if an object/val is empty.

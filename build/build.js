@@ -20,5 +20,7 @@ var myUsers = {
 }
 
 $(document).ready(function(){
-  $('#myInput').tagUser({data: myUsers});
+  $('#singleInput').tagUser({data: myUsers});
+  $('#multipleInput').tagUser({data: myUsers, multiple: true});
+  $('#editableDiv').tagUser({data: myUsers, multiple: true});
 })
